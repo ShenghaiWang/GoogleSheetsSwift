@@ -1,7 +1,10 @@
 import Foundation
+#if canImport(Security)
 import Security
+#endif
+#if canImport(CommonCrypto)
 import CommonCrypto
-
+#endif
 /// Result of authentication flow
 public struct AuthResult {
     public let accessToken: String
@@ -36,7 +39,7 @@ public protocol OAuth2TokenManager {
     /// Clear stored tokens (logout)
     func clearTokens() async throws
 }
-
+#if os(macOS)
 /// Secure token storage using Keychain
 internal class KeychainTokenStorage {
     private let service: String
@@ -312,6 +315,8 @@ public class GoogleOAuth2TokenManager: OAuth2TokenManager {
     }
 }
 
+#endif
+
 // MARK: - Service Account Authentication
 
 /// Service account key structure from Google Cloud Console JSON key file
@@ -522,7 +527,9 @@ private struct JWTHeader: Codable {
 public class ServiceAccountTokenManager: OAuth2TokenManager {
     private let serviceAccountKey: ServiceAccountKey
     private let httpClient: HTTPClient
+#if os(macOS)
     private let tokenStorage: KeychainTokenStorage?
+#endif
     private var impersonationUser: String?
     private let tokenRefreshQueue = DispatchQueue(label: "com.googlesheets.token-refresh", qos: .userInitiated)
     private var currentRefreshTask: Task<String, Error>?
@@ -532,7 +539,12 @@ public class ServiceAccountTokenManager: OAuth2TokenManager {
         self.serviceAccountKey = serviceAccountKey
         self.httpClient = httpClient ?? URLSessionHTTPClient()
         self.useKeychain = useKeychain
+#if os(macOS)
         self.tokenStorage = useKeychain ? KeychainTokenStorage(service: "GoogleSheetsSwift.ServiceAccount.\(serviceAccountKey.clientEmail)") : nil
+#else
+        self.useKeychain = false
+#endif
+
     }
     
     /// Initialize with service account key file path
@@ -564,6 +576,7 @@ public class ServiceAccountTokenManager: OAuth2TokenManager {
     }
     
     public func getAccessToken() async throws -> String {
+#if os(macOS)
         // If keychain is disabled (server-side), always generate fresh tokens
         guard useKeychain, let tokenStorage = tokenStorage else {
             return try await performTokenRefresh()
@@ -588,16 +601,20 @@ public class ServiceAccountTokenManager: OAuth2TokenManager {
         
         currentRefreshTask = refreshTask
         return try await refreshTask.value
+#else
+        return try await performTokenRefresh()
+#endif
     }
     
     private func performTokenRefresh() async throws -> String {
+#if os(macOS)
         // Double-check if token is still expired (another task might have refreshed it)
         if let tokenStorage = tokenStorage,
            let accessToken = try tokenStorage.getAccessToken(),
            !(try tokenStorage.isTokenExpired()) {
             return accessToken
         }
-        
+#endif
         // Generate JWT
         let scopes = ["https://www.googleapis.com/auth/spreadsheets"]
         let jwt = try JWTGenerator.generateJWT(
@@ -624,7 +641,7 @@ public class ServiceAccountTokenManager: OAuth2TokenManager {
         )
         
         let response: TokenResponse = try await httpClient.execute(request)
-        
+        #if os(macOS)
         // Cache the token only if keychain is enabled
         if let tokenStorage = tokenStorage {
             try tokenStorage.storeTokens(
@@ -633,13 +650,15 @@ public class ServiceAccountTokenManager: OAuth2TokenManager {
                 expiresIn: response.expiresIn
             )
         }
-        
+        #endif
         return response.accessToken
     }
     
     public func refreshToken() async throws -> String {
+        #if os(macOS)
         // Force refresh by clearing current token and generating new one
         try tokenStorage?.clearTokens()
+        #endif
         return try await performTokenRefresh()
     }
     
@@ -655,7 +674,9 @@ public class ServiceAccountTokenManager: OAuth2TokenManager {
     }
     
     public func clearTokens() async throws {
+        #if os(macOS)
         try tokenStorage?.clearTokens()
+        #endif
     }
     
     /// Load service account from file

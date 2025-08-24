@@ -499,7 +499,7 @@ extension GoogleSheetsClient {
             return false
         }
     }
-    
+#if canImport(Security)
     /// Parse an A1 notation range string
     /// - Parameter range: The A1 notation range to parse
     /// - Returns: Parsed A1Range object
@@ -515,7 +515,7 @@ extension GoogleSheetsClient {
         )
         return try valuesService.parseA1Range(range)
     }
-    
+#endif
     /// Convert column number to letters (1=A, 2=B, ..., 26=Z, 27=AA, etc.)
     /// - Parameter columnNumber: The column number (1-based)
     /// - Returns: The column letters
